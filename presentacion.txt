@@ -1,1 +1,1 @@
-Hola, este repositorio es para las actualizaciones que haga el trabajar en mis scripts de R
+Hola, este repositorio es para las actualizaciones que haga al trabajar en mis scripts de R
