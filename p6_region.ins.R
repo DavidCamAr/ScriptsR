@@ -15,23 +15,20 @@ setwd("~/Documents/Datos_xTea/")
 
 ##CARGAMOS AL OBJETO "TEs_data.rc" EN NUESTRO AMBIENTE########### 
 
-##Filtro para quedarnos solo con cáncer y trofoblastos
-f0 <- subset(TEs_data.rc,
-             !(Tejido %in% c("Breast", "Colon", "Liver") & Condicion == "Sano"))
-
 # Arreglamos texto
 
-f0$Info_gen <- gsub(":.*","",f0$Info_gen)
+TEs_data.rc$Info_gen <- gsub(":.*","",TEs_data.rc$Info_gen)
 
 ##Sumatoria de inserciones de TEs en cada ubicacion genomica
-f1 <- aggregate(f0$TE, by = list(f0$TE,
-                                       f0$Tejido,
-                                       f0$Info_gen,
-                                       f0$RC),
+f1 <- aggregate(TEs_data.rc$TE, by = list(TEs_data.rc$TE,
+                                       TEs_data.rc$Tejido,
+                                       TEs_data.rc$Condicion,
+                                       TEs_data.rc$Info_gen,
+                                       TEs_data.rc$RC),
                 FUN = length)
 
 colnames(f1) <- c("TE",
-                  "Tejido",
+                  "Tejido", "Condicion",
                   "Region_insercion", 
                   "RC","Count_TE")
 
@@ -52,14 +49,26 @@ f1 <- f1 %>%
   mutate(RPM = (Count_TE / RC) * 10^6)
 
 ##Promedio de RPM
-f2 <- aggregate(f1$RPM, by = list(f1$TE, f1$Region_insercion, f1$Tejido), FUN = mean)
+# f2 <- aggregate(f1$RPM, by = list(f1$TE, f1$Region_insercion, f1$Tejido), FUN = mean)
+f2 <- aggregate(RPM ~ Region_insercion + TE + Condicion + Tejido, data = f1, FUN = mean)
 
-# Etiquetamos columnas
-colnames(f2) <- c("TE","Region_insercion","Tejido","RPM.prom")
+#Sacamos combinaciones entre observaciones
+tejidos <- unique(f2$Tejido)
+condicion <- unique(f2$Condicion)
+region <- unique(f2$Region_insercion)
+tipos_TE <- unique(f2$TE)
+combinaciones <- expand.grid(Region_insercion = region, Tejido = tejidos,
+                             Condicion = condicion, TE = tipos_TE)
+
+#Juntamos combinaciones al d.f de trabajo
+f2 <- merge(combinaciones, f2, by = c("Region_insercion","Tejido","Condicion","TE"),
+            all.x = TRUE, all.y = FALSE)
+##Agregamos valores =NA a los valores faltantes
+f2$RPM[is.na(f2$RPM)] <- NA
 
 ##Levels
 f2$Tejido <- recode_factor(f2$Tejido,
-                           "Trofoblastos" = "Trofoblastos",
+                           "Trofoblastos" = "Trofoblasto",
                            "Breast" = "Mama",
                            "Colon" = "Colon",
                            "Liver" = "Hígado")
@@ -67,7 +76,7 @@ f2$TE <- recode_factor(f2$TE,
                        "ALU" = "Alu",
                        "LINE1" = "L1",
                        "SVA" = "SVA")
-f2$Region_ins <- recode_factor(f2$Region_ins,
+f2$Region_insercion <- recode_factor(f2$Region_insercion,
                                "exon" = "Exón",
                                "intron" = "Intrón",
                                "not_gene_region" = "Región intergénica",
@@ -75,22 +84,59 @@ f2$Region_ins <- recode_factor(f2$Region_ins,
                                "up_stream" = "Upstream",
                                "UTR5" = "UTR5",
                                "UTR3" = "UTR3")
+
+##Filtro para quedarnos solo con cáncer y trofoblastos
+f3 <- subset(f2, !(Tejido %in% c("Mama", "Colon", "Hígado") & Condicion == "Sano"))
+
 #Para graficar tenemos que tener un d.f con la siguiente estructura y encabezados
-str(f2)
+str(f3)
 
-# 'data.frame':	54 obs. of  5 variables:
-#   $ TE              : Factor w/ 3 levels "Alu","L1","SVA": 1 2 3 1 1 2 3 1 2 3 ...
-# $ Region_insercion: chr  "down_stream" "down_stream" "down_stream" "exon" ...
-# $ Tejido          : Factor w/ 4 levels "Trofoblastos",..: 2 2 2 2 2 2 2 2 2 2 ...
-# $ RPM.prom        : num  0.2682 0.0806 0.1454 0.1305 3.8922 ...
-# $ Region_ins      : Factor w/ 7 levels "Exón","Intrón",..: 4 4 4 1 2 2 2 3 3 3 ...
+# 'data.frame':	105 obs. of  5 variables:
+# $ Region_insercion: Factor w/ 7 levels "Exón","Intrón",..: 4 4 4 4 4 4 4 4 4 4 ...
+# $ Tejido          : Factor w/ 4 levels "Trofoblasto",..: 2 2 2 3 3 3 4 4 4 1 ...
+# $ Condicion       : Factor w/ 2 levels "Sano","Tumor": 2 2 2 2 2 2 2 2 2 1 ...
+# $ TE              : Factor w/ 3 levels "Alu","L1","SVA": 1 2 3 1 2 3 1 2 3 1 ...
+# $ RPM             : num  0.2682 0.0806 0.1454 0.3999 0.0636 ...
 
+# Calculamos los valores de RPM en porcentaje
+f3 <- f3 %>%
+  group_by(Tejido, TE) %>%
+  mutate(Porcentaje = RPM / sum(RPM, na.rm = TRUE))
 
 # Grafica
-bar.reg <- ggplot(f2, aes(x = TE, y = RPM.prom, fill = Region_ins))+
-             geom_bar(stat = "identity",
-                      position = "fill")+
-  facet_grid( ~ Tejido)+
+bar.reg <- f3 %>% 
+  ggplot(aes(x = TE, y = RPM, fill = Region_insercion))+
+  geom_col(position = "fill")+
+  geom_label(show.legend = NULL,
+            data=subset(f3, Tejido == "Trofoblasto" 
+                        & Region_insercion == "Exón" 
+                        & TE == "Alu"),
+            aes(label=scales::percent(Porcentaje, scale = 100, suffix = "%",
+                                      accuracy = 1)),
+            position = position_fill(vjust = 0.98),  # Ajusta la posición de las etiquetas
+            size = 5,
+            color = "black",
+            fontface = "bold") +
+  geom_label(show.legend = NULL,
+            data=subset(f3, Tejido %in% c("Mama","Colon","Hígado") 
+                        & Region_insercion == "Exón" 
+                        & TE %in% c("Alu","L1")),
+            aes(label=scales::percent(Porcentaje, scale = 100, suffix = "%",
+                                      accuracy = 1)),
+            position = position_fill(vjust = 0.99),  # Ajusta la posición de las etiquetas
+            size = 5,
+            color = "black",
+            fontface = "bold") +
+  geom_label(show.legend = NULL,
+            data=subset(f3, Region_insercion %in% c("Intrón","Región intergénica","Downstream") 
+                        & Tejido %in% c("Mama","Hígado","Trofoblasto") & TE == "SVA"),
+            aes(label=scales::percent(Porcentaje, scale = 100, suffix = "%",
+                                      accuracy = 1)),
+            position = position_fill(vjust = 0.5),  # Ajusta la posición de las etiquetas
+            size = 5,
+            color = "black",
+            fontface = "bold") +
+  facet_grid(~Tejido)+
        ylab("Proporción")+
   theme_bw()+
   theme(
@@ -111,6 +157,7 @@ bar.reg <- ggplot(f2, aes(x = TE, y = RPM.prom, fill = Region_ins))+
                      breaks = c(0.1, 0.2, 0.3, 0.4,
                                 0.5, 0.6, 0.7, 0.8, 0.9, 1))
 bar.reg
+
 ##guardamos
 ggsave(filename = "Region.TEs.jpg",
        plot = bar.reg,
